@@ -1,75 +1,19 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>题解侧栏</title>
-  <link rel="stylesheet" href="vendor/katex/katex.min.css">
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand"><span class="brand-mark">∑</span><div><strong>题解侧栏</strong><small>截图 · 提问 · 追问</small></div></div>
-      <div class="header-actions">
-        <button id="historyButton" class="icon-button" type="button" title="历史对话" aria-label="历史对话">☷</button>
-        <button id="newButton" class="icon-button" type="button" title="新对话" aria-label="新对话">＋</button>
-        <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
-      </div>
-    </header>
-
-    <section id="chatView" class="view active" aria-label="聊天">
-      <div id="status" class="status" role="status" aria-live="polite"></div>
-      <main id="messages" class="messages" aria-live="polite"></main>
-      <div class="composer-area">
-        <div id="attachment" class="attachment hidden">
-          <img id="attachmentImage" alt="待发送的题目截图">
-          <div class="attachment-copy"><strong>截图已加入</strong><span id="attachmentSize"></span></div>
-          <button id="removeImageButton" class="icon-button compact" type="button" title="移除截图" aria-label="移除截图">×</button>
-        </div>
-        <div class="capture-row">
-          <button id="regionButton" class="capture-button primary" type="button"><span>▣</span> 框选题目</button>
-          <button id="screenButton" class="capture-button" type="button"><span>▤</span> 整屏截图</button>
-        </div>
-        <form id="composeForm" class="compose-form">
-          <label class="sr-only" for="promptInput">输入问题</label>
-          <textarea id="promptInput" rows="2" placeholder="补充要求，例如：求第 3 小题…"></textarea>
-          <div class="compose-bottom"><span>Enter 发送 · Shift+Enter 换行</span><button id="sendButton" class="send-button" type="submit">发送 <span>↗</span></button><button id="stopButton" class="stop-button hidden" type="button">停止</button></div>
-        </form>
-      </div>
-    </section>
-
-    <section id="cropView" class="view subview" aria-label="框选截图">
-      <div class="subview-header"><button class="back-button" data-back="chat" type="button">← 返回</button><strong>框选题目</strong></div>
-      <p id="cropHint" class="hint">在截图上拖动选区。网页和 PDF 都可以截取当前可见内容。</p>
-      <div class="crop-controls"><label for="zoomInput">缩放</label><input id="zoomInput" type="range" min="1" max="3" step="0.25" value="1"><span id="zoomLabel">100%</span></div>
-      <div id="cropScroller" class="crop-scroller"><canvas id="cropCanvas" aria-label="截图，拖动选择题目区域"></canvas></div>
-      <div class="crop-actions"><button id="useScreenButton" class="capture-button" type="button">使用整屏</button><button id="useCropButton" class="send-button" type="button" disabled>使用选区</button></div>
-    </section>
-
-    <section id="historyView" class="view subview" aria-label="历史对话">
-      <div class="subview-header"><button class="back-button" data-back="chat" type="button">← 返回</button><strong>历史对话</strong></div>
-      <div id="historyList" class="history-list"></div>
-    </section>
-
-    <section id="settingsView" class="view subview" aria-label="设置">
-      <div class="subview-header"><button class="back-button" data-back="chat" type="button">← 返回</button><strong>设置</strong></div>
-      <div class="settings-content">
-        <h2>DeepSeek API Key</h2>
-        <p>请求从此扩展直接发送到 DeepSeek 官方 API。Key 仅保存在当前 Edge 配置文件的本地扩展存储中。</p>
-        <form id="settingsForm">
-          <label for="apiKeyInput">API Key</label>
-          <div class="key-row"><input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…"><button id="toggleKeyButton" type="button">显示</button></div>
-          <button class="send-button full" type="submit">保存 Key</button>
-        </form>
-        <button id="clearKeyButton" class="text-button" type="button">删除已保存的 Key</button>
-        <div class="settings-note"><strong>截图范围</strong><p>普通网页可直接在页面上拖动框选。Edge 不允许注入选框的页面（如内置 PDF）会切换到侧栏裁剪。截图只包含当前标签页的可见内容，不包含侧栏或工具栏。本地 PDF 如被 Edge 拒绝，请在扩展详情中开启“允许访问文件 URL”。</p></div>
-      </div>
-    </section>
-  </div>
-  <script src="vendor/katex/katex.min.js"></script>
-  <script src="vendor/markdown-it/markdown-it.umd.min.js"></script>
-  <script src="renderer.js"></script>
-  <script src="app.js"></script>
-</body>
-</html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>题解</title><link rel="stylesheet" href="vendor/katex/katex.min.css"><link rel="stylesheet" href="style.css"></head>
+<body><div class="app">
+<header class="topbar"><div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="5"/><path d="M8 9h8l-6 6h6"/></svg></span><strong>题解</strong><span class="model-badge"><i></i>DeepSeek</span></div><div class="header-actions"><button id="historyButton" class="icon-button" title="历史对话" aria-label="历史对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5m4-1v5l3 2"/></svg></button><button id="newButton" class="icon-button" title="新对话" aria-label="新对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button id="settingsButton" class="icon-button" title="设置" aria-label="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none"/></svg></button></div></header>
+<div id="status" class="status" role="status" aria-live="polite"></div>
+<section id="chatView" class="view active" aria-label="聊天">
+<div class="conversation-bar"><span id="conversationTitle">新对话</span><button id="exportButton" class="icon-button" title="导出当前对话" aria-label="导出当前对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></button></div>
+<main id="messages" class="messages" aria-label="对话内容"></main>
+<div class="composer-area"><form id="composeForm" class="compose-form">
+<div id="attachment" class="attachment hidden"></div>
+<label class="sr-only" for="promptInput">输入问题</label><textarea id="promptInput" rows="2" placeholder="问一道题，或继续追问…"></textarea>
+<div class="compose-bottom"><div class="capture-row"><button id="regionButton" class="tool-button" type="button" title="直接在网页框选题目"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M8 8h8v8H8z"/></svg><span>框选</span></button><button id="screenButton" class="icon-button" type="button" title="截取可见页面" aria-label="截取可见页面"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></button><button id="uploadButton" class="icon-button" type="button" title="添加图片，也可直接粘贴" aria-label="添加图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></button></div><button id="sendButton" class="send-button square" type="submit" title="发送" aria-label="发送" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 12 6-6 6 6m-6-6v14"/></svg></button><button id="stopButton" class="stop-button square hidden" type="button" title="停止生成" aria-label="停止生成"><span></span></button></div>
+</form><div class="composer-hint"><span>可粘贴图片</span><span>Enter 发送 · Shift + Enter 换行</span></div><input id="imageFileInput" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" hidden></div>
+</section>
+<section id="cropView" class="view subview" aria-label="裁剪截图"><div class="subview-header"><button class="back-button" data-back="chat" aria-label="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><strong>裁剪题目</strong></div><p id="cropHint" class="hint">拖动选择题目区域。</p><div class="crop-controls"><label for="zoomInput">缩放</label><input id="zoomInput" type="range" min="1" max="3" step="0.25" value="1"><span id="zoomLabel">100%</span></div><div id="cropScroller" class="crop-scroller"><canvas id="cropCanvas" aria-label="拖动选择题目区域"></canvas></div><div class="crop-actions"><button id="useScreenButton" class="secondary-button">使用整屏</button><button id="useCropButton" class="send-button" disabled>使用选区</button></div></section>
+<section id="previewView" class="view subview" aria-label="图片预览"><div class="subview-header"><button class="back-button" data-back="chat" aria-label="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><strong>图片预览</strong></div><div class="image-preview-stage"><img id="fullPreviewImage" alt="题目原图"></div><p class="hint">点击图片切换原始尺寸，可滚动查看细节。</p></section>
+<section id="historyView" class="view subview" aria-label="历史对话"><div class="subview-header"><button class="back-button" data-back="chat" aria-label="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><strong>历史对话</strong></div><div class="search-wrap"><input id="historySearch" type="search" placeholder="搜索题目或对话内容…" aria-label="搜索历史对话"></div><div id="historyList" class="history-list"></div></section>
+<section id="settingsView" class="view subview" aria-label="设置"><div class="subview-header"><button class="back-button" data-back="chat" aria-label="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><strong>设置</strong></div><div class="settings-content"><div class="eyebrow">连接你的 AI</div><h2>DeepSeek</h2><p>使用自己的 API Key，按官方 API 用量计费。</p><form id="settingsForm"><label for="apiKeyInput">API Key</label><div class="key-row"><input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…"><button id="toggleKeyButton" type="button">显示</button></div><button class="send-button full" type="submit">保存设置</button></form><button id="clearKeyButton" class="text-button danger" type="button">移除已保存的 Key</button><div class="settings-note"><strong>只保存在这台设备</strong><p>Key、截图和对话存储在本地。发送问题时，内容直接传给 DeepSeek 官方 API。</p></div><div class="settings-note"><strong>截图与 PDF</strong><p>普通网页直接框选。内置 PDF 等受限制的页面使用侧栏裁剪。本地 PDF 需要在扩展详情中开启“允许访问文件 URL”。</p></div><div class="version-label">题解侧栏 · 1.4.0</div></div></section>
+</div><script src="vendor/katex/katex.min.js"></script><script src="vendor/markdown-it/markdown-it.umd.min.js"></script><script src="renderer.js"></script><script src="app.js"></script></body></html>

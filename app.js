@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const DB_NAME = "question-sidebar-v1";
 const SYSTEM_PROMPT = "你是严谨的中文解题助手。先准确辨认用户截图中的题目，再给出答案和必要的推导步骤。遇到多小题，优先按用户指定的题号回答。若题干、数字、选项或图形看不清，明确指出看不清的部分并请用户重新截取；不要猜测或编造。对不确定的结论标明不确定。连续追问时结合先前对话和截图。数学公式请用 $...$ 或 $$...$$ 包住，不要输出没有定界符的 LaTeX 命令。";
-const state = { db: null, conversations: [], current: null, key: "", pendingImage: null, cropImage: null, cropData: null, cropRect: null, dragging: false, selection: null, streamController: null, streamFinished: null, finishStream: null, saveTimer: null, statusTimer: null };
+const state = { db: null, conversations: [], current: null, key: "", pendingImages: [], imageLoading: false, sending: false, cropImage: null, cropData: null, cropRect: null, dragging: false, selection: null, streamController: null, streamFinished: null, finishStream: null, saveTimer: null, statusTimer: null };
 
 function showStatus(message, kind = "", persist = false) {
   const el = $("status");
@@ -16,7 +16,8 @@ function showStatus(message, kind = "", persist = false) {
 function showView(name) {
   for (const el of document.querySelectorAll(".view")) el.classList.toggle("active", el.id === `${name}View`);
   if (name === "history") renderHistory();
-  if (name === "settings") $("apiKeyInput").value = state.key;
+  $("apiKeyInput").type = "password"; $("toggleKeyButton").textContent = "显示";
+  $("apiKeyInput").value = name === "settings" ? state.key : "";
 }
 
 function openDb() {
@@ -32,8 +33,11 @@ function dbRequest(method, value) {
   return new Promise((resolve, reject) => {
     const transaction = state.db.transaction("conversations", method === "getAll" ? "readonly" : "readwrite");
     const request = transaction.objectStore("conversations")[method](...(value === undefined ? [] : [value]));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    let result;
+    request.onsuccess = () => { result = request.result; };
+    transaction.oncomplete = () => resolve(result);
+    transaction.onabort = () => reject(transaction.error || new Error("本地记录写入失败"));
+    transaction.onerror = () => reject(transaction.error);
   });
 }
 
@@ -50,8 +54,26 @@ async function persistCurrent() {
 }
 
 function scheduleSave() {
-  clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(() => persistCurrent().catch((error) => showStatus(`保存记录失败：${error.message}`, "error", true)), 500);
+  if (state.saveTimer) return;
+  state.saveTimer = setTimeout(() => {
+    state.saveTimer = null;
+    persistCurrent().catch(reportError);
+  }, 500);
+}
+
+function stashDraft() {
+  if (!state.current) return;
+  state.current.draftText = $("promptInput").value;
+  state.current.draftImages = [...state.pendingImages];
+  scheduleSave();
+}
+
+function updateComposer() {
+  $("sendButton").disabled = !state.current || state.sending || state.imageLoading || (!$("promptInput").value.trim() && !state.pendingImages.length);
+  const input = $("promptInput");
+  input.style.height = "auto";
+  input.style.height = `${Math.min(160, Math.max(56, input.scrollHeight))}px`;
+  $("conversationTitle").textContent = state.current?.title || "新对话";
 }
 
 function stopStream() {
@@ -63,12 +85,15 @@ async function switchConversation(conversation) {
     stopStream();
     await state.streamFinished;
   }
+  stashDraft();
   clearTimeout(state.saveTimer);
+  state.saveTimer = null;
   await persistCurrent();
   state.current = conversation;
   await dbRequest("put", conversation);
   if (!state.conversations.some((item) => item.id === conversation.id)) state.conversations.push(conversation);
-  state.pendingImage = null;
+  state.pendingImages = [...(conversation.draftImages || [])];
+  $("promptInput").value = conversation.draftText || "";
   updateAttachment();
   await chrome.storage.local.set({ activeConversationId: conversation.id });
   renderMessages();
@@ -77,12 +102,15 @@ async function switchConversation(conversation) {
 }
 
 function renderMessages() {
+  updateComposer();
   const root = $("messages");
   root.replaceChildren();
   if (!state.current?.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.innerHTML = '<div class="empty-icon">∑</div><h1>从一道题开始</h1><p>点“框选题目”截取当前页面，写一句要求后直接发送。解题过程中可以继续追问。</p>';
+    empty.innerHTML = '<div class="empty-kicker">YOUR STUDY SPACE</div><h1>从一道题开始。</h1><p>框选网页上的题目，或粘贴一张图片。<br>解题、梳理思路，然后继续追问。</p><div class="empty-actions"><button type="button" data-empty="capture">框选一道题</button><button type="button" data-empty="upload">添加图片</button></div>';
+    empty.querySelector('[data-empty="capture"]').onclick = () => selectOnPage().catch(reportError);
+    empty.querySelector('[data-empty="upload"]').onclick = () => $("imageFileInput").click();
     root.append(empty);
     return;
   }
@@ -109,12 +137,19 @@ function makeMessageNode(message) {
   meta.textContent = message.role === "user" ? "你" : "DeepSeek";
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  if (message.image) {
-    const img = document.createElement("img");
-    img.className = "message-image";
-    img.src = message.image;
-    img.alt = "题目截图";
-    bubble.append(img);
+  const images = messageImages(message);
+  if (images.length) {
+    const gallery = document.createElement("div");
+    gallery.className = "message-images";
+    for (const src of images) {
+      const img = document.createElement("img");
+      img.className = "message-image"; img.src = src; img.alt = "题目截图";
+      img.tabIndex = 0; img.setAttribute("role", "button");
+      img.onclick = () => previewImage(src);
+      img.onkeydown = (event) => { if (event.key === "Enter") previewImage(src); };
+      gallery.append(img);
+    }
+    bubble.append(gallery);
   }
   const body = document.createElement("div");
   body.className = "message-body";
@@ -127,36 +162,112 @@ function makeMessageNode(message) {
     bubble.append(cursor);
   }
   item.append(meta, bubble);
+  appendMessageActions(item, message);
   return item;
 }
 
 function updateMessageNode(message) {
   const item = $("messages").querySelector(`[data-message-id="${message.id}"]`);
   if (!item) return;
+  const follow = $("messages").scrollHeight - $("messages").scrollTop - $("messages").clientHeight < 90;
   item.classList.toggle("failed", !!message.failed);
   renderMessageBody(item.querySelector(".message-body"), message);
   const cursor = item.querySelector(".typing");
   if (!message.streaming && cursor) cursor.remove();
-  $("messages").scrollTop = $("messages").scrollHeight;
+  if (!message.streaming) appendMessageActions(item, message);
+  if (follow) $("messages").scrollTop = $("messages").scrollHeight;
+}
+
+function messageImages(message) { return message.images || (message.image ? [message.image] : []); }
+
+function previewImage(src) {
+  $("fullPreviewImage").classList.remove("original-size");
+  $("fullPreviewImage").src = src;
+  showView("preview");
 }
 
 function updateAttachment() {
-  const has = !!state.pendingImage;
-  $("attachment").classList.toggle("hidden", !has);
-  if (has) {
-    $("attachmentImage").src = state.pendingImage;
-    $("attachmentSize").textContent = `${Math.round(state.pendingImage.length * 0.75 / 1024)} KB · 可继续输入要求`;
-  } else $("attachmentImage").removeAttribute("src");
+  const root = $("attachment");
+  root.replaceChildren();
+  root.classList.toggle("hidden", !state.pendingImages.length);
+  state.pendingImages.forEach((src, index) => {
+    const card = document.createElement("div"); card.className = "attachment-card";
+    const preview = document.createElement("button"); preview.type = "button"; preview.className = "attachment-preview"; preview.title = `预览第 ${index + 1} 张图片`;
+    const image = document.createElement("img"); image.src = src; image.alt = `题目图片 ${index + 1}`;
+    preview.append(image); preview.onclick = () => previewImage(src);
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "attachment-remove"; remove.textContent = "×";
+    remove.setAttribute("aria-label", `移除第 ${index + 1} 张图片`);
+    remove.onclick = () => { state.pendingImages.splice(index, 1); updateAttachment(); };
+    card.append(preview, remove); root.append(card);
+  });
+  if (state.pendingImages.length) {
+    const count = document.createElement("span"); count.className = "attachment-count"; count.textContent = `${state.pendingImages.length} / 4`; root.append(count);
+  }
+  stashDraft(); updateComposer();
+}
+
+function addAttachment(src) {
+  if (state.pendingImages.length >= 4) throw new Error("每次最多添加 4 张图片，请先发送或移除一张。");
+  state.pendingImages.push(src); updateAttachment();
+}
+
+async function importImages(files) {
+  if (state.imageLoading) return;
+  state.imageLoading = true; updateComposer();
+  let added = 0;
+  try {
+    for (const file of files) {
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("支持 PNG、JPEG、WebP 和 GIF 图片。");
+      if (state.pendingImages.length >= 4) throw new Error("每次最多添加 4 张图片，已保留成功添加的图片。");
+      if (file.size > 20 * 1024 * 1024) throw new Error("单张图片请小于 20 MB。");
+      const url = URL.createObjectURL(file);
+      try {
+        const image = await loadImage(url);
+        const ratio = Math.min(1, 4096 / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas"); canvas.width = Math.max(1, Math.round(image.width * ratio)); canvas.height = Math.max(1, Math.round(image.height * ratio));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        addAttachment(normalizeCanvas(canvas)); added++;
+      } finally { URL.revokeObjectURL(url); }
+    }
+    if (added) showStatus(`已添加 ${added} 张图片。`, "success");
+  } catch (error) { reportError(error); }
+  finally { state.imageLoading = false; updateComposer(); $("imageFileInput").value = ""; }
+}
+
+function appendMessageActions(item, message) {
+  item.querySelector(".message-actions")?.remove();
+  if (message.role !== "assistant" || message.streaming) return;
+  const row = document.createElement("div"); row.className = "message-actions";
+  const copy = document.createElement("button"); copy.type = "button"; copy.className = "message-action"; copy.textContent = "复制回答";
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(message.content); copy.textContent = "已复制"; setTimeout(() => { copy.textContent = "复制回答"; }, 1600); }
+    catch { showStatus("复制失败，请选中文字后复制。", "error"); }
+  };
+  row.append(copy);
+  if (state.current?.messages.at(-1)?.id === message.id) {
+    const retry = document.createElement("button"); retry.type = "button"; retry.className = "message-action"; retry.textContent = message.failed ? "重试" : "重新回答";
+    retry.onclick = () => retryMessage(message).catch(reportError); row.append(retry);
+  }
+  item.append(row);
+}
+
+function exportConversation() {
+  if (!state.current?.messages.length) { showStatus("当前对话还没有内容。"); return; }
+  const text = `# ${state.current.title}\n\n` + state.current.messages.map((m) => `## ${m.role === "user" ? "提问" : "回答"}\n\n${m.content}${messageImages(m).length ? `\n\n（附图 ${messageImages(m).length} 张）` : ""}`).join("\n\n---\n\n");
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a"); link.href = url; link.download = `${state.current.title.replace(/[\\/:*?"<>|]/g, "_")}.md`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function renderHistory() {
   const list = $("historyList");
   list.replaceChildren();
-  const sorted = [...state.conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+  const query = $("historySearch").value.trim().toLowerCase();
+  const sorted = [...state.conversations].filter((c) => !query || c.title.toLowerCase().includes(query) || c.messages.some((m) => m.content.toLowerCase().includes(query))).sort((a, b) => b.updatedAt - a.updatedAt);
   if (!sorted.length) {
     const empty = document.createElement("p");
     empty.className = "history-empty";
-    empty.textContent = "还没有历史对话";
+    empty.textContent = query ? "没有找到匹配的对话" : "还没有历史对话";
     list.append(empty);
   }
   for (const conversation of sorted) {
@@ -186,7 +297,16 @@ function renderHistory() {
         setTimeout(() => { armed = false; remove.textContent = "×"; remove.title = "删除此对话"; }, 4000);
       } else deleteConversation(conversation).catch(reportError);
     });
-    row.append(open, remove);
+    const rename = document.createElement("button"); rename.type = "button"; rename.className = "history-rename"; rename.textContent = "命名";
+    rename.onclick = () => {
+      const input = document.createElement("input"); input.className = "history-title-input"; input.value = conversation.title; input.maxLength = 60;
+      open.replaceWith(input); input.focus(); input.select();
+      let saved = false;
+      const save = async () => { if (saved) return; saved = true; conversation.title = input.value.trim() || conversation.title; await dbRequest("put", conversation); renderHistory(); updateComposer(); };
+      input.onkeydown = (event) => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); save().catch(reportError); } if (event.key === "Escape") { saved = true; renderHistory(); } };
+      input.onblur = () => save().catch(reportError);
+    };
+    row.append(open, rename, remove);
     list.append(row);
   }
 }
@@ -197,7 +317,7 @@ async function deleteConversation(conversation) {
       stopStream();
       await state.streamFinished;
     }
-    clearTimeout(state.saveTimer);
+    clearTimeout(state.saveTimer); state.saveTimer = null;
   }
   await dbRequest("delete", conversation.id);
   state.conversations = state.conversations.filter((x) => x.id !== conversation.id);
@@ -208,6 +328,9 @@ async function deleteConversation(conversation) {
       await dbRequest("put", state.current);
     }
     await chrome.storage.local.set({ activeConversationId: state.current.id });
+    state.pendingImages = [...(state.current.draftImages || [])];
+    $("promptInput").value = state.current.draftText || "";
+    updateAttachment();
     renderMessages();
   }
   renderHistory();
@@ -313,6 +436,8 @@ function clearSelection() {
 }
 
 async function selectOnPage() {
+  if (state.imageLoading) { showStatus("图片还在导入，请稍等。", "error"); return; }
+  if (state.pendingImages.length >= 4) { showStatus("已添加 4 张图片，请先发送或移除一张。", "error"); return; }
   if (state.streamController) { showStatus("请先等待回答结束或点击停止。", "error"); return; }
   if (state.selection) { showStatus("请在题目页面拖动框选，按 Esc 可取消。", ""); return; }
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -355,7 +480,7 @@ async function completePageSelection(selection, payload) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.drawImage(image, x, y, w, h, 0, 0, w, h);
   const black = looksBlack(context, w, h);
-  state.pendingImage = normalizeCanvas(canvas);
+  addAttachment(normalizeCanvas(canvas));
   updateAttachment();
   showStatus(black ? "选区截图几乎全黑，可能是受保护画面；请检查缩略图。" : "题目已框选并加入聊天。", black ? "error" : "success");
 }
@@ -373,6 +498,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 });
 
 async function capture(mode) {
+  if (state.imageLoading) { showStatus("图片还在导入，请稍等。", "error"); return; }
+  if (state.pendingImages.length >= 4) { showStatus("已添加 4 张图片，请先发送或移除一张。", "error"); return; }
+  if (state.selection) { showStatus("请先完成网页框选，或按 Esc 取消。"); return; }
   if (state.streamController) { showStatus("请先等待回答结束或点击停止。", "error"); return; }
   showStatus("正在截取当前标签页…", "", true);
   try {
@@ -397,7 +525,7 @@ async function capture(mode) {
       showView("crop");
       showStatus("");
     } else {
-      state.pendingImage = normalizeCanvas(canvas);
+      addAttachment(normalizeCanvas(canvas));
       updateAttachment();
       showView("chat");
       showStatus(black ? "截图内容几乎全黑，可能是受保护画面；发送前请检查缩略图。" : "整屏截图已加入，可直接发送。", black ? "error" : "success");
@@ -431,7 +559,13 @@ function looksBlack(ctx, width, height) {
 
 function normalizeCanvas(canvas) {
   const png = canvas.toDataURL("image/png");
-  return png.length < 4 * 1024 * 1024 ? png : canvas.toDataURL("image/jpeg", 0.92);
+  if (png.length < 4 * 1024 * 1024) return png;
+  const flattened = document.createElement("canvas");
+  flattened.width = canvas.width; flattened.height = canvas.height;
+  const context = flattened.getContext("2d");
+  context.fillStyle = "#fff"; context.fillRect(0, 0, flattened.width, flattened.height);
+  context.drawImage(canvas, 0, 0);
+  return flattened.toDataURL("image/jpeg", 0.92);
 }
 
 function drawCrop() {
@@ -476,7 +610,7 @@ function useCrop() {
   canvas.width = Math.ceil(rect.w);
   canvas.height = Math.ceil(rect.h);
   canvas.getContext("2d").drawImage(state.cropImage, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
-  state.pendingImage = normalizeCanvas(canvas);
+  addAttachment(normalizeCanvas(canvas));
   state.cropImage = null;
   state.cropData = null;
   updateAttachment();
@@ -486,26 +620,23 @@ function useCrop() {
 
 function buildApiMessages(messages) {
   const recent = messages.filter((m) => !m.failed && !m.streaming).slice(-30);
-  let imageCount = 0;
-  let imageBytes = 0;
-  const includeImage = new Set();
+  let count = 0, bytes = 0;
+  const selected = new Map();
   for (let i = recent.length - 1; i >= 0; i--) {
-    const image = recent[i].image;
-    if (image && imageCount < 4 && imageBytes + image.length < 25 * 1024 * 1024) {
-      includeImage.add(recent[i].id);
-      imageCount++;
-      imageBytes += image.length;
+    const images = messageImages(recent[i]); const chosen = [];
+    for (let j = images.length - 1; j >= 0; j--) {
+      if (count < 4 && bytes + images[j].length < 25 * 1024 * 1024) { chosen.unshift(images[j]); count++; bytes += images[j].length; }
     }
+    selected.set(recent[i].id, chosen);
   }
-  return [
-    { role: "system", content: SYSTEM_PROMPT },
-    ...recent.map((message) => {
-      if (message.role === "assistant") return { role: "assistant", content: message.content };
-      const content = [{ type: "text", text: message.content + (message.image && !includeImage.has(message.id) ? "\n[较早的截图未随本轮请求附上；若需查看，请让用户重新截图。]" : "") }];
-      if (message.image && includeImage.has(message.id)) content.push({ type: "image_url", image_url: { url: message.image, detail: "original" } });
-      return { role: "user", content };
-    })
-  ];
+  return [{ role: "system", content: SYSTEM_PROMPT }, ...recent.map((message) => {
+    if (message.role === "assistant") return { role: "assistant", content: message.content };
+    const images = selected.get(message.id) || [];
+    const omitted = images.length < messageImages(message).length;
+    const content = [{ type: "text", text: message.content + (omitted ? "\n[本轮未附上部分旧截图，需要时请用户重新添加。]" : "") }];
+    for (const image of images) content.push({ type: "image_url", image_url: { url: image, detail: "original" } });
+    return { role: "user", content };
+  })];
 }
 
 async function streamAnswer(messages, onDelta, signal) {
@@ -549,55 +680,47 @@ async function streamAnswer(messages, onDelta, signal) {
 }
 
 async function sendMessage() {
-  if (state.streamController) return;
+  if (state.sending || state.imageLoading || !state.current) return;
   if (!state.key) { showView("settings"); showStatus("先填写 DeepSeek API Key。", "error", true); return; }
   const typed = $("promptInput").value.trim();
-  if (!typed && !state.pendingImage) { showStatus("先输入问题或截取题目。", "error"); return; }
-  const user = { id: crypto.randomUUID(), role: "user", content: typed || "请解答截图中的题目，给出答案和必要步骤。", image: state.pendingImage || null, createdAt: Date.now() };
-  const assistant = { id: crypto.randomUUID(), role: "assistant", content: "", createdAt: Date.now(), streaming: true };
-  state.current.messages.push(user, assistant);
+  if (!typed && !state.pendingImages.length) return;
+  const user = { id: crypto.randomUUID(), role: "user", content: typed || "请解答图片中的题目，给出答案和必要步骤。", images: [...state.pendingImages], createdAt: Date.now() };
+  state.current.messages.push(user);
   if (state.current.title === "新对话") state.current.title = typed ? typed.slice(0, 25) : "截图题目";
-  state.pendingImage = null;
-  $("promptInput").value = "";
-  updateAttachment();
-  renderMessages();
-  await persistCurrent();
+  state.pendingImages = []; $("promptInput").value = ""; updateAttachment();
+  const assistant = { id: crypto.randomUUID(), role: "assistant", content: "", createdAt: Date.now(), streaming: true };
+  const context = [...state.current.messages]; state.current.messages.push(assistant);
+  await generateAnswer(context, assistant);
+}
+
+async function retryMessage(message) {
+  if (state.sending || state.current?.messages.at(-1)?.id !== message.id) return;
+  if (!state.key) { showView("settings"); showStatus("先填写 DeepSeek API Key。", "error", true); return; }
   const context = state.current.messages.slice(0, -1);
+  message.content = ""; message.failed = false; message.streaming = true;
+  await generateAnswer(context, message);
+}
+
+async function generateAnswer(context, assistant) {
   const controller = new AbortController();
-  state.streamController = controller;
+  state.sending = true; state.streamController = controller;
   state.streamFinished = new Promise((resolve) => { state.finishStream = resolve; });
-  $("sendButton").classList.add("hidden");
-  $("stopButton").classList.remove("hidden");
-  showStatus("");
+  $("sendButton").classList.add("hidden"); $("stopButton").classList.remove("hidden");
+  renderMessages(); showStatus("");
   try {
-    await streamAnswer(context, (delta) => {
-      assistant.content += delta;
-      updateMessageNode(assistant);
-      scheduleSave();
-    }, controller.signal);
-    if (!assistant.content.trim()) throw new Error("接口没有返回文字，请重试。");
+    await persistCurrent();
+    await streamAnswer(context, (delta) => { assistant.content += delta; updateMessageNode(assistant); scheduleSave(); }, controller.signal);
+    if (!assistant.content.trim()) throw new Error("没有收到回答，请点击重试。");
   } catch (error) {
-    if (error.name === "AbortError") {
-      assistant.failed = true;
-      assistant.content = assistant.content ? `${assistant.content}\n\n[已停止生成]` : "已停止生成。";
-    } else {
-      assistant.failed = true;
-      assistant.content = assistant.content ? `${assistant.content}\n\n[回答中断：${error.message}]` : `请求失败：${error.message}`;
-      showStatus(error.message, "error", true);
-    }
+    assistant.failed = true;
+    if (error.name === "AbortError") assistant.content = assistant.content ? `${assistant.content}\n\n[已停止生成]` : "已停止生成。";
+    else { assistant.content = assistant.content ? `${assistant.content}\n\n[回答中断：${error.message}]` : `请求失败：${error.message}`; showStatus(error.message, "error", true); }
   } finally {
     assistant.streaming = false;
-    $("sendButton").classList.remove("hidden");
-    $("stopButton").classList.add("hidden");
-    updateMessageNode(assistant);
-    clearTimeout(state.saveTimer);
+    $("sendButton").classList.remove("hidden"); $("stopButton").classList.add("hidden");
+    updateMessageNode(assistant); clearTimeout(state.saveTimer); state.saveTimer = null;
     try { await persistCurrent(); }
-    finally {
-      state.streamController = null;
-      state.finishStream();
-      state.streamFinished = null;
-      state.finishStream = null;
-    }
+    finally { state.streamController = null; state.sending = false; state.finishStream(); state.streamFinished = null; state.finishStream = null; updateComposer(); }
   }
 }
 
@@ -620,6 +743,9 @@ async function init() {
   state.current = state.conversations.find((x) => x.id === stored.activeConversationId) || [...state.conversations].sort((a, b) => b.updatedAt - a.updatedAt)[0] || newConversation();
   if (!state.conversations.some((x) => x.id === state.current.id)) { state.conversations.push(state.current); await dbRequest("put", state.current); }
   await chrome.storage.local.set({ activeConversationId: state.current.id });
+  state.pendingImages = [...(state.current.draftImages || [])];
+  $("promptInput").value = state.current.draftText || "";
+  updateAttachment();
   renderMessages();
   if (!state.key) showStatus("在设置中填入 DeepSeek API Key 后即可开始。", "", true);
 }
@@ -630,13 +756,13 @@ $("settingsButton").addEventListener("click", () => showView("settings"));
 for (const button of document.querySelectorAll("[data-back]")) button.addEventListener("click", () => showView(button.dataset.back));
 $("regionButton").addEventListener("click", () => selectOnPage().catch(reportError));
 $("screenButton").addEventListener("click", () => capture("screen"));
-$("removeImageButton").addEventListener("click", () => { state.pendingImage = null; updateAttachment(); });
+
 $("useScreenButton").addEventListener("click", async () => {
   const image = await loadImage(state.cropData);
   const canvas = document.createElement("canvas");
   canvas.width = image.width; canvas.height = image.height;
   canvas.getContext("2d").drawImage(image, 0, 0);
-  state.pendingImage = normalizeCanvas(canvas);
+  addAttachment(normalizeCanvas(canvas));
   state.cropImage = null; state.cropData = null;
   updateAttachment(); showView("chat"); showStatus("整屏截图已加入。", "success");
 });
@@ -683,4 +809,19 @@ $("clearKeyButton").addEventListener("click", async () => {
   showStatus("已删除保存的 API Key。", "success");
 });
 
+$("promptInput").addEventListener("input", () => { stashDraft(); updateComposer(); });
+$("fullPreviewImage").addEventListener("click", () => $("fullPreviewImage").classList.toggle("original-size"));
+$("historySearch").addEventListener("input", renderHistory);
+$("exportButton").addEventListener("click", exportConversation);
+$("uploadButton").addEventListener("click", () => $("imageFileInput").click());
+$("imageFileInput").addEventListener("change", (event) => importImages([...event.target.files]));
+document.addEventListener("paste", (event) => {
+  if (!$("chatView").classList.contains("active")) return;
+  const files = [...(event.clipboardData?.items || [])].filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter(Boolean);
+  if (files.length) { event.preventDefault(); importImages(files); }
+});
+const dropZone = $("composeForm");
+for (const type of ["dragenter", "dragover"]) dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.add("dragging"); });
+dropZone.addEventListener("dragleave", (event) => { if (!dropZone.contains(event.relatedTarget)) dropZone.classList.remove("dragging"); });
+dropZone.addEventListener("drop", (event) => { event.preventDefault(); dropZone.classList.remove("dragging"); importImages([...event.dataTransfer.files]); });
 init().catch(reportError);
