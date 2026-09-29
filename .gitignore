@@ -1,0 +1,11 @@
+.env
+.env.*
+*.pem
+*.key
+*.crx
+*.zip
+node_modules/
+.edge-test-profile/
+.DS_Store
+Thumbs.db
+/edge-question-assistant/

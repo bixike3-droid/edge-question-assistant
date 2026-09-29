@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>题解侧栏</title>
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">∑</span><div><strong>题解侧栏</strong><small>截图 · 提问 · 追问</small></div></div>
+      <div class="header-actions">
+        <button id="historyButton" class="icon-button" type="button" title="历史对话" aria-label="历史对话">☷</button>
+        <button id="newButton" class="icon-button" type="button" title="新对话" aria-label="新对话">＋</button>
+        <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
+      </div>
+    </header>
+
+    <section id="chatView" class="view active" aria-label="聊天">
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <main id="messages" class="messages" aria-live="polite"></main>
+      <div class="composer-area">
+        <div id="attachment" class="attachment hidden">
+          <img id="attachmentImage" alt="待发送的题目截图">
+          <div class="attachment-copy"><strong>截图已加入</strong><span id="attachmentSize"></span></div>
+          <button id="removeImageButton" class="icon-button compact" type="button" title="移除截图" aria-label="移除截图">×</button>
+        </div>
+        <div class="capture-row">
+          <button id="regionButton" class="capture-button primary" type="button"><span>▣</span> 框选题目</button>
+          <button id="screenButton" class="capture-button" type="button"><span>▤</span> 整屏截图</button>
+        </div>
+        <form id="composeForm" class="compose-form">
+          <label class="sr-only" for="promptInput">输入问题</label>
+          <textarea id="promptInput" rows="2" placeholder="补充要求，例如：求第 3 小题…"></textarea>
+          <div class="compose-bottom"><span>Enter 发送 · Shift+Enter 换行</span><button id="sendButton" class="send-button" type="submit">发送 <span>↗</span></button><button id="stopButton" class="stop-button hidden" type="button">停止</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="cropView" class="view subview" aria-label="框选截图">
+      <div class="subview-header"><button class="back-button" data-back="chat" type="button">← 返回</button><strong>框选题目</strong></div>
+      <p id="cropHint" class="hint">在截图上拖动选区。网页和 PDF 都可以截取当前可见内容。</p>
+      <div class="crop-controls"><label for="zoomInput">缩放</label><input id="zoomInput" type="range" min="1" max="3" step="0.25" value="1"><span id="zoomLabel">100%</span></div>
+      <div id="cropScroller" class="crop-scroller"><canvas id="cropCanvas" aria-label="截图，拖动选择题目区域"></canvas></div>
+      <div class="crop-actions"><button id="useScreenButton" class="capture-button" type="button">使用整屏</button><button id="useCropButton" class="send-button" type="button" disabled>使用选区</button></div>
+    </section>
+
+    <section id="historyView" class="view subview" aria-label="历史对话">
+      <div class="subview-header"><button class="back-button" data-back="chat" type="button">← 返回</button><strong>历史对话</strong></div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
+    <section id="settingsView" class="view subview" aria-label="设置">
+      <div class="subview-header"><button class="back-button" data-back="chat" type="button">← 返回</button><strong>设置</strong></div>
+      <div class="settings-content">
+        <h2>DeepSeek API Key</h2>
+        <p>请求从此扩展直接发送到 DeepSeek 官方 API。Key 仅保存在当前 Edge 配置文件的本地扩展存储中。</p>
+        <form id="settingsForm">
+          <label for="apiKeyInput">API Key</label>
+          <div class="key-row"><input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…"><button id="toggleKeyButton" type="button">显示</button></div>
+          <button class="send-button full" type="submit">保存 Key</button>
+        </form>
+        <button id="clearKeyButton" class="text-button" type="button">删除已保存的 Key</button>
+        <div class="settings-note"><strong>截图范围</strong><p>普通网页可直接在页面上拖动框选。Edge 不允许注入选框的页面（如内置 PDF）会切换到侧栏裁剪。截图只包含当前标签页的可见内容，不包含侧栏或工具栏。本地 PDF 如被 Edge 拒绝，请在扩展详情中开启“允许访问文件 URL”。</p></div>
+      </div>
+    </section>
+  </div>
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="vendor/markdown-it/markdown-it.umd.min.js"></script>
+  <script src="renderer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
