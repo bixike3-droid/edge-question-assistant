@@ -3,6 +3,11 @@
 const $ = (id) => document.getElementById(id);
 const DB_NAME = "question-sidebar-v1";
 const SYSTEM_PROMPT = "你是严谨的中文解题助手。先准确辨认用户截图中的题目，再给出答案和必要的推导步骤。遇到多小题，优先按用户指定的题号回答。若题干、数字、选项或图形看不清，明确指出看不清的部分并请用户重新截取；不要猜测或编造。对不确定的结论标明不确定。连续追问时结合先前对话和截图。数学公式请用 $...$ 或 $$...$$ 包住，不要输出没有定界符的 LaTeX 命令。";
+const MODE_PROMPTS = {
+  steps: "按分步讲解模式回答：列出关键推导，每一步说明理由，最后清楚给出答案。",
+  concise: "按简洁答案模式回答：先给最终答案，只保留必要计算和结论，不展开冗长说明。",
+  check: "按检查作答模式回答：核对用户给出的解答，指出第一处错误或确认正确，并说明原因和修正方法。若用户尚未提供自己的作答，请先请用户贴出作答，不要直接替他完整重做。"
+};
 const state = { db: null, conversations: [], current: null, key: "", pendingImages: [], imageLoading: false, sending: false, cropImage: null, cropData: null, cropRect: null, dragging: false, selection: null, streamController: null, streamFinished: null, finishStream: null, saveTimer: null, statusTimer: null };
 
 function showStatus(message, kind = "", persist = false) {
@@ -42,7 +47,7 @@ function dbRequest(method, value) {
 }
 
 function newConversation() {
-  return { id: crypto.randomUUID(), title: "新对话", createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+  return { id: crypto.randomUUID(), title: "新对话", mode: "steps", createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
 }
 
 async function persistCurrent() {
@@ -70,6 +75,9 @@ function stashDraft() {
 
 function updateComposer() {
   $("sendButton").disabled = !state.current || state.sending || state.imageLoading || (!$("promptInput").value.trim() && !state.pendingImages.length);
+  const mode = state.current?.mode || "steps";
+  $("modeSelect").value = MODE_PROMPTS[mode] ? mode : "steps";
+  $("promptInput").placeholder = mode === "check" ? "贴上你的作答，AI 会逐步帮你检查…" : "问一道题，或继续追问…";
   const input = $("promptInput");
   input.style.height = "auto";
   input.style.height = `${Math.min(160, Math.max(56, input.scrollHeight))}px`;
@@ -90,6 +98,7 @@ async function switchConversation(conversation) {
   state.saveTimer = null;
   await persistCurrent();
   state.current = conversation;
+  state.current.mode ||= "steps";
   await dbRequest("put", conversation);
   if (!state.conversations.some((item) => item.id === conversation.id)) state.conversations.push(conversation);
   state.pendingImages = [...(conversation.draftImages || [])];
@@ -629,7 +638,7 @@ function buildApiMessages(messages) {
     }
     selected.set(recent[i].id, chosen);
   }
-  return [{ role: "system", content: SYSTEM_PROMPT }, ...recent.map((message) => {
+  return [{ role: "system", content: `${SYSTEM_PROMPT}\n\n${MODE_PROMPTS[state.current?.mode] || MODE_PROMPTS.steps}` }, ...recent.map((message) => {
     if (message.role === "assistant") return { role: "assistant", content: message.content };
     const images = selected.get(message.id) || [];
     const omitted = images.length < messageImages(message).length;
@@ -741,6 +750,7 @@ async function init() {
     if (repaired) await dbRequest("put", conversation);
   }
   state.current = state.conversations.find((x) => x.id === stored.activeConversationId) || [...state.conversations].sort((a, b) => b.updatedAt - a.updatedAt)[0] || newConversation();
+  state.current.mode ||= "steps";
   if (!state.conversations.some((x) => x.id === state.current.id)) { state.conversations.push(state.current); await dbRequest("put", state.current); }
   await chrome.storage.local.set({ activeConversationId: state.current.id });
   state.pendingImages = [...(state.current.draftImages || [])];
@@ -810,6 +820,13 @@ $("clearKeyButton").addEventListener("click", async () => {
 });
 
 $("promptInput").addEventListener("input", () => { stashDraft(); updateComposer(); });
+$("modeSelect").addEventListener("change", () => {
+  if (!state.current) return;
+  state.current.mode = MODE_PROMPTS[$("modeSelect").value] ? $("modeSelect").value : "steps";
+  stashDraft();
+  dbRequest("put", state.current).catch(reportError);
+  updateComposer();
+});
 $("fullPreviewImage").addEventListener("click", () => $("fullPreviewImage").classList.toggle("original-size"));
 $("historySearch").addEventListener("input", renderHistory);
 $("exportButton").addEventListener("click", exportConversation);
