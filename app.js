@@ -2,10 +2,10 @@
 
 const $ = (id) => document.getElementById(id);
 const DB_NAME = "question-sidebar-v1";
-const SYSTEM_PROMPT = "你是严谨的中文解题助手。先准确辨认用户截图中的题目，再给出答案和必要的推导步骤。遇到多小题，优先按用户指定的题号回答。若题干、数字、选项或图形看不清，明确指出看不清的部分并请用户重新截取；不要猜测或编造。对不确定的结论标明不确定。连续追问时结合先前对话和截图。数学公式请用 $...$ 或 $$...$$ 包住，不要输出没有定界符的 LaTeX 命令。";
+const SYSTEM_PROMPT = "你是严谨的中文解题助手。先判断题型和用户指定的小题，再严格按当前回答模式作答。题干、数字、选项或图形看不清时，明确指出看不清的部分并请用户重新截取；不要猜测或编造。连续追问时结合先前对话和截图。数学公式请用 $...$ 或 $$...$$ 包住，不要输出没有定界符的 LaTeX 命令。";
 const MODE_PROMPTS = {
-  steps: "按分步讲解模式回答：列出关键推导，每一步说明理由，最后清楚给出答案。",
-  concise: "按简洁答案模式回答：先给最终答案，只保留必要计算和结论，不展开冗长说明。",
+  steps: "按分步讲解模式回答：展示解题过程，每一步说明理由，最后清楚给出答案。选择题也说明关键判断依据。",
+  concise: "按题型控制输出长度，严格遵守：选择题只给正确选项的字母或编号，不解释；填空题只给应填内容，多空按顺序列出，不推导；判断题只给判断结果。证明题、解答题和计算题给出完成题目必需的最少推导步骤，并明确结论。不要添加寒暄、题意复述或额外讲解。题目有多小题时，按题号对应给出结果。",
   check: "按检查作答模式回答：核对用户给出的解答，指出第一处错误或确认正确，并说明原因和修正方法。若用户尚未提供自己的作答，请先请用户贴出作答，不要直接替他完整重做。"
 };
 const state = { db: null, conversations: [], current: null, key: "", pendingImages: [], imageLoading: false, sending: false, cropImage: null, cropData: null, cropRect: null, dragging: false, selection: null, streamController: null, streamFinished: null, finishStream: null, saveTimer: null, statusTimer: null };
