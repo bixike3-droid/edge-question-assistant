@@ -1,0 +1,13 @@
+{
+  "name": "edge-question-assistant",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Development checks for the build-free Edge extension",
+  "scripts": {
+    "test": "node --test tests/core.test.cjs tests/api.test.cjs tests/renderer.test.cjs tests/background.test.cjs",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

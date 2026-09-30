@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "题解侧栏",
   "description": "截取网页或 PDF 中的题目，使用自己的 DeepSeek API Key 在侧栏连续提问。",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "minimum_chrome_version": "116",
   "permissions": [
     "sidePanel",
