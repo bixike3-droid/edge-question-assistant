@@ -8,7 +8,7 @@ const MODE_PROMPTS = {
   concise: "按题型控制输出长度，严格遵守：选择题只给正确选项的字母或编号，不解释；填空题只给应填内容，多空按顺序列出，不推导；判断题只给判断结果。证明题、解答题和计算题给出完成题目必需的最少推导步骤，并明确结论。不要添加寒暄、题意复述或额外讲解。题目有多小题时，按题号对应给出结果。",
   check: "按检查作答模式回答：核对用户给出的解答，指出第一处错误或确认正确，并说明原因和修正方法。若用户尚未提供自己的作答，请先请用户贴出作答，不要直接替他完整重做。"
 };
-const state = { db: null, conversations: [], current: null, key: "", pendingImages: [], imageLoading: false, sending: false, cropImage: null, cropData: null, cropRect: null, dragging: false, selection: null, streamController: null, streamFinished: null, finishStream: null, saveTimer: null, statusTimer: null };
+const state = { db: null, conversations: [], current: null, key: "", pendingImages: [], imageLoading: false, sending: false, cropImage: null, cropData: null, cropRect: null, dragging: false, selection: null, streamController: null, streamFinished: null, finishStream: null, saveTimer: null, statusTimer: null, windowId: null, lastShortcutId: null };
 
 function showStatus(message, kind = "", persist = false) {
   const el = $("status");
@@ -21,6 +21,7 @@ function showStatus(message, kind = "", persist = false) {
 function showView(name) {
   for (const el of document.querySelectorAll(".view")) el.classList.toggle("active", el.id === `${name}View`);
   if (name === "history") renderHistory();
+  if (name === "settings") refreshShortcutLabel().catch(reportError);
   $("apiKeyInput").type = "password"; $("toggleKeyButton").textContent = "显示";
   $("apiKeyInput").value = name === "settings" ? state.key : "";
 }
@@ -444,13 +445,43 @@ function clearSelection() {
   state.selection = null;
 }
 
-async function selectOnPage() {
+function focusComposer() {
+  showView("chat");
+  requestAnimationFrame(() => { window.focus(); $("promptInput").focus({ preventScroll: true }); });
+}
+
+async function refreshShortcutLabel() {
+  const commands = await chrome.commands.getAll();
+  const shortcut = commands.find((item) => item.name === "capture-question")?.shortcut;
+  $("shortcutLabel").textContent = shortcut || "尚未分配";
+  $("regionButton").title = shortcut ? `框选题目 · ${shortcut}` : "直接在网页框选题目";
+}
+
+async function consumeShortcut(request) {
+  if (!state.current || !request || request.windowId !== state.windowId || request.id === state.lastShortcutId) return;
+  state.lastShortcutId = request.id;
+  const key = `captureShortcut:${state.windowId}`;
+  const stored = await chrome.storage.session.get(key);
+  if (stored[key]?.id === request.id) await chrome.storage.session.remove(key);
+  if (Date.now() - request.createdAt > 15000) return;
+  showView("chat");
+  await selectOnPage({ tabId: request.tabId, windowId: request.windowId });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "session" || state.windowId == null) return;
+  const request = changes[`captureShortcut:${state.windowId}`]?.newValue;
+  if (request) consumeShortcut(request).catch(reportError);
+});
+
+async function selectOnPage(target = null) {
   if (state.imageLoading) { showStatus("图片还在导入，请稍等。", "error"); return; }
   if (state.pendingImages.length >= 4) { showStatus("已添加 4 张图片，请先发送或移除一张。", "error"); return; }
   if (state.streamController) { showStatus("请先等待回答结束或点击停止。", "error"); return; }
   if (state.selection) { showStatus("请在题目页面拖动框选，按 Esc 可取消。", ""); return; }
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = await chrome.tabs.query(target ? { active: true, windowId: target.windowId } : { active: true, currentWindow: true });
   if (!tab?.id || !tab?.windowId) throw new Error("找不到当前题目标签页。");
+  if (target && tab.id !== target.tabId) throw new Error("标签页已切换，请在题目页面重新按快捷键。");
   const sessionId = crypto.randomUUID();
   state.selection = { sessionId, tabId: tab.id, windowId: tab.windowId, timer: null };
   try {
@@ -465,7 +496,7 @@ async function selectOnPage() {
   } catch {
     clearSelection();
     $("cropHint").textContent = "当前页面不允许直接画选框。请在这张可见区域截图上拖动选区。";
-    await capture("region");
+    await capture("region", { tabId: tab.id, windowId: tab.windowId });
   }
 }
 
@@ -491,6 +522,7 @@ async function completePageSelection(selection, payload) {
   const black = looksBlack(context, w, h);
   addAttachment(normalizeCanvas(canvas));
   updateAttachment();
+  focusComposer();
   showStatus(black ? "选区截图几乎全黑，可能是受保护画面；请检查缩略图。" : "题目已框选并加入聊天。", black ? "error" : "success");
 }
 
@@ -506,14 +538,15 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
-async function capture(mode) {
+async function capture(mode, target = null) {
   if (state.imageLoading) { showStatus("图片还在导入，请稍等。", "error"); return; }
   if (state.pendingImages.length >= 4) { showStatus("已添加 4 张图片，请先发送或移除一张。", "error"); return; }
   if (state.selection) { showStatus("请先完成网页框选，或按 Esc 取消。"); return; }
   if (state.streamController) { showStatus("请先等待回答结束或点击停止。", "error"); return; }
   showStatus("正在截取当前标签页…", "", true);
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await chrome.tabs.query(target ? { active: true, windowId: target.windowId } : { active: true, currentWindow: true });
+    if (target && tab?.id !== target.tabId) throw new Error("标签页已切换，请回到题目页面重试。");
     if (!tab?.windowId) throw new Error("找不到当前标签页。请切回题目页面后重试。");
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     if (!dataUrl) throw new Error("截图未返回图像，请重试。");
@@ -536,7 +569,7 @@ async function capture(mode) {
     } else {
       addAttachment(normalizeCanvas(canvas));
       updateAttachment();
-      showView("chat");
+      focusComposer();
       showStatus(black ? "截图内容几乎全黑，可能是受保护画面；发送前请检查缩略图。" : "整屏截图已加入，可直接发送。", black ? "error" : "success");
     }
     if (black && mode === "region") showStatus("截图内容几乎全黑，可能是受保护画面。", "error", true);
@@ -623,7 +656,7 @@ function useCrop() {
   state.cropImage = null;
   state.cropData = null;
   updateAttachment();
-  showView("chat");
+  focusComposer();
   showStatus("选区截图已加入，可补充要求后发送。", "success");
 }
 
@@ -758,6 +791,12 @@ async function init() {
   updateAttachment();
   renderMessages();
   if (!state.key) showStatus("在设置中填入 DeepSeek API Key 后即可开始。", "", true);
+  const currentWindow = await chrome.windows.getCurrent();
+  state.windowId = currentWindow.id;
+  await refreshShortcutLabel();
+  const key = `captureShortcut:${state.windowId}`;
+  const queued = await chrome.storage.session.get(key);
+  await consumeShortcut(queued[key]);
 }
 
 $("historyButton").addEventListener("click", () => showView("history"));
@@ -774,7 +813,7 @@ $("useScreenButton").addEventListener("click", async () => {
   canvas.getContext("2d").drawImage(image, 0, 0);
   addAttachment(normalizeCanvas(canvas));
   state.cropImage = null; state.cropData = null;
-  updateAttachment(); showView("chat"); showStatus("整屏截图已加入。", "success");
+  updateAttachment(); focusComposer(); showStatus("整屏截图已加入。", "success");
 });
 $("useCropButton").addEventListener("click", useCrop);
 $("zoomInput").addEventListener("input", drawCrop);
@@ -831,6 +870,7 @@ $("fullPreviewImage").addEventListener("click", () => $("fullPreviewImage").clas
 $("historySearch").addEventListener("input", renderHistory);
 $("exportButton").addEventListener("click", exportConversation);
 $("uploadButton").addEventListener("click", () => $("imageFileInput").click());
+$("changeShortcutButton").addEventListener("click", () => chrome.tabs.create({ url: "edge://extensions/shortcuts" }).catch(reportError));
 $("imageFileInput").addEventListener("change", (event) => importImages([...event.target.files]));
 document.addEventListener("paste", (event) => {
   if (!$("chatView").classList.contains("active")) return;
